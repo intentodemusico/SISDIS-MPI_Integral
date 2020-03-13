@@ -1,49 +1,88 @@
+# -*- coding: utf-8 -*-
+"""
+Created on Fri Mar 13 13:23:38 2020
+
+@author: INTENTODEMUSICO
+"""
+
+#%% importing libraries
 from mpi4py import MPI
+import numpy as np
+import time 
+import math
 global area, dx
+
+#%% defining functions
 area=0
-def f(x):
-    return 52*x**3+532*x**2-431*x-35228
-def iterationLi(i):
+def f(x): #f(x) function, returns result of f(x)
+    return 5258*x**3+x*math.exp(5) #
+def iterationLi(i): #returns li for a determined iteration
     return a+dx*i
-def sumArea(obtained):
+def sumArea(obtained): #sums areas to local area
     global area
     area+=obtained
-def getArea(li):
+def getArea(li): #returns a rectangle area with li=$li
     return getH(li)*dx
-def getH(li):
+def getH(li): #returns h (or y) for a determined li=$li
     return f(li+dx/2)
-    
-comm = MPI.COMM_WORLD
-rank = comm.Get_rank()
-nodes=comm.size()
 
-#Start nodes in sequential order
-myNode=nodes-1
-#print(comm, rank)
+#%% communication
+comm = MPI.COMM_WORLD #stablishes communication
+rank = comm.Get_rank() #node rank
+name = MPI.Get_processor_name() #gets processor name
 
-#%Const
-n=1000000
-#n=10000000000
-a=-5000
+
+print("My node",rank,"Name",name,"Nodes",comm.size,"\n")
+
+#%% global const
+n=10000000000
+a=-5000 
 b=5000
 dx=(b-a)/n
 
+#%% implementation
+start=int(n/comm.size*rank) #defines local a (or first li)
 
-#n= n/nodos*miNodo,n/nodos*(miNodo+1)       ->[miNodo] starts with 0
-start=int(n/comm.size*myNode)
-stop=int(n/comm.size*(myNode+1))+2 if(myNode==comm.size()-1) else int(n/comm.size*(myNode+1))
+#################################################################################################################################################################
+#defines b=int(totalN/number of nodes *rank+1)+2 if this is the last node and totalN/number of nodes isn't float, else -> b=int(totalN/number of nodes*(rank+1))#
+#           *rank+1 is used to select the interval according to the node rank (every node will run the inverval number rank+1)                                  #
+#                       +2 is used to fix the loss of the trunk function                                                                                        #
+#################################################################################################################################################################
+
+stop=int(n/comm.size*(rank+1))+2 if(rank==comm.size-1 and int(n/comm.size*(rank+1))!=n/comm.size*(rank+1) ) else int(n/comm.size*(rank+1))
+print("Node",rank,"Start",start,"Stop",stop)
+
+
+#%% calculating area
+t = time.time()
 for i in range(start,stop):
     sumArea(getArea(iterationLi(i)))
-#print(area)
+elapsed = time.time() - t #elapsed time
 
+#%% sending messages according to rank
 if rank == 0:
-    data1 = 0.0
-    comm.Recv(data1, source=1, tag=1)
-    sumArea(data1)
-    data2 = 0.0
-    comm.Recv(data2, source=1, tag=2)
-    sumArea(data2)
-    
-elif rank == 1:
-    data = area
-    comm.Send(data, dest=0, tag=myNode)
+    print("Master local area:",area)
+    for i in range(1,3): #receive 2 messages
+        print(name,rank,"waiting",i)
+        req = comm.irecv(source=MPI.ANY_SOURCE, tag=1)
+        data = req.wait() #wait until a message is incoming from any source with tag 1
+        print(name,rank,"Received",i)
+        sumArea(data["area"]) #updates master local area and elapsed time
+        elapsed+=data["time"]
+    print("\n\nTotal area:",area)
+    print("\nTotal time:",elapsed)
+else:
+    data = {"area":area,"time":elapsed} #dictionary containing time and area
+    comm.isend(data, dest=0, tag=1)#sending dictionary
+    print(name,rank,"sent",area,"local time:",elapsed)    
+
+
+                                    #%%conclusions%%#
+#############################################################################################
+#It is important to use good programming practices due to the needing of a recoding task.   #
+#The best way to measure higher times and obtaining best precision is using lower dx.       #
+#It is necesary to understand synchronus programming for using blocking methods.            #
+#############################################################################################
+
+
+#
